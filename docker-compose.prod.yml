@@ -1,0 +1,78 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Production deployment on VPS
+#
+# This file EXTENDS docker-compose.yml with production-specific overrides.
+# Never run it standalone — always use both files together:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Or create an alias on the server (see docs/sessions/session-04-deployment.md)
+#
+# Key differences from dev:
+#   - Images come from the registry (built by CI), not local builds
+#   - Caddy handles TLS and acts as the external reverse proxy
+#   - No build context (images are pre-built)
+#   - Restart policy is always
+#   - Resource limits applied
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  db:
+    restart: always
+    # No port exposed — only reachable inside the Docker network
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+
+  api:
+    # Pull the image built and pushed by CI
+    # Set REGISTRY and IMAGE_TAG in your .env on the server
+    image: ${REGISTRY:-ghcr.io/your-org/team-notes-api}:${IMAGE_TAG:-latest}
+    # Remove the build block inherited from the base file
+    build: !reset null
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+
+  frontend:
+    image: ${REGISTRY:-ghcr.io/your-org/team-notes-frontend}:${IMAGE_TAG:-latest}
+    build: !reset null
+    restart: always
+    # In production, Caddy is the public entry point, not nginx directly.
+    # Caddy listens on 80/443 and proxies to this container on port 80.
+    # We don't expose the port to the host — Caddy reaches it via the network.
+    ports: !reset []
+    deploy:
+      resources:
+        limits:
+          memory: 64m
+
+  # ── Caddy — TLS termination + reverse proxy ─────────────────────────────────
+  caddy:
+    image: caddy:2-alpine
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+      # Caddy needs this port to complete ACME challenges via HTTP-01
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Persist TLS certificates and Caddy state across restarts
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
+    networks:
+      - notes_net
+    deploy:
+      resources:
+        limits:
+          memory: 64m
+
+volumes:
+  caddy_data:
+  caddy_config:

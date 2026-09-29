@@ -1,0 +1,56 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Caddyfile — production reverse proxy
+#
+# Replace "notes.example.com" with your actual domain.
+# Caddy automatically obtains and renews a Let's Encrypt TLS certificate.
+#
+# Architecture on the VPS:
+#
+#   Internet
+#      │  :443 (HTTPS)
+#      ▼
+#   Caddy  ──────────────► frontend container :80
+#      │                       │
+#      │                       │ (nginx inside the container proxies
+#      │                       │  /api/* and /health to api:3000)
+#      │
+#      └── (Caddy could also proxy /api directly, but keeping nginx
+#           in the middle means the dev and prod setups are identical)
+#
+# ─────────────────────────────────────────────────────────────────────────────
+
+notes.example.com {
+    # Caddy auto-HTTPS: obtains a cert from Let's Encrypt automatically.
+    # No extra configuration needed — just make sure port 80 and 443
+    # are open in your VPS firewall and your DNS A record points here.
+
+    # Forward all traffic to the frontend nginx container.
+    # "frontend" resolves via Docker's internal DNS (service name).
+    reverse_proxy frontend:80
+
+    # Logging — visible with: docker compose logs caddy
+    log {
+        output stdout
+        format console
+    }
+
+    # Security headers
+    header {
+        # Prevent clickjacking
+        X-Frame-Options DENY
+        # Stop MIME sniffing
+        X-Content-Type-Options nosniff
+        # Basic XSS protection
+        X-XSS-Protection "1; mode=block"
+        # Only send HTTPS, tell browsers to remember it for 1 year
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        # Remove the Caddy server header
+        -Server
+    }
+}
+
+# Optional: redirect bare HTTP to HTTPS (Caddy does this automatically,
+# but this block makes it explicit for teaching purposes)
+http://notes.example.com {
+    redir https://notes.example.com{uri} permanent
+}

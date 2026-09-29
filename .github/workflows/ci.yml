@@ -1,0 +1,157 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# CI/CD pipeline for Team Notes
+#
+# Triggered on every push and pull request to the dev branch.
+#
+# Jobs:
+#   1. test   — install deps, run unit tests (no Docker, no DB needed)
+#   2. build  — build Docker images, push to GHCR  (only on push to dev)
+#   3. deploy — SSH into VPS, pull new images, restart stack (only on dev)
+#
+# Required GitHub Secrets (Settings → Secrets → Actions):
+#   GHCR_TOKEN      — GitHub Personal Access Token with write:packages scope
+#   VPS_HOST        — IP or hostname of the production server
+#   VPS_USER        — SSH username (e.g. "deploy")
+#   VPS_SSH_KEY     — Private SSH key (contents of ~/.ssh/id_ed25519)
+#   DB_PASSWORD     — PostgreSQL password used on the server
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: CI / CD
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [dev]
+
+env:
+  REGISTRY: ghcr.io
+  # github.repository is "owner/repo" e.g. "acme/team-notes"
+  API_IMAGE:      ghcr.io/${{ github.repository }}/api
+  FRONTEND_IMAGE: ghcr.io/${{ github.repository }}/frontend
+
+jobs:
+
+  # ── Job 1: Test ─────────────────────────────────────────────────────────────
+  test:
+    name: Run tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: api/package.json
+
+      - name: Install dependencies
+        working-directory: api
+        run: npm install
+
+      - name: Run tests
+        working-directory: api
+        run: npm test
+
+  # ── Job 2: Build & push Docker images ───────────────────────────────────────
+  build:
+    name: Build & push images
+    runs-on: ubuntu-latest
+    # Only build and push when merging to dev — not on PRs from forks
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    needs: test   # don't build a broken image
+
+    permissions:
+      contents: read
+      packages: write  # required to push to GHCR
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Tag images with both the git SHA (immutable) and "latest"
+      - name: Build & push API image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./api
+          push: true
+          tags: |
+            ${{ env.API_IMAGE }}:${{ github.sha }}
+            ${{ env.API_IMAGE }}:latest
+          cache-from: type=gha
+          cache-to:   type=gha,mode=max
+
+      - name: Build & push frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: true
+          tags: |
+            ${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
+            ${{ env.FRONTEND_IMAGE }}:latest
+          cache-from: type=gha
+          cache-to:   type=gha,mode=max
+
+  # ── Job 3: Deploy to VPS ─────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to VPS
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    needs: build
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host:     ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key:      ${{ secrets.VPS_SSH_KEY }}
+          # Commands run on the VPS:
+          #  1. cd into the project directory
+          #  2. pull the latest docker-compose files from git
+          #  3. log in to GHCR so we can pull the new images
+          #  4. pull new images
+          #  5. restart the stack with zero-downtime (--no-deps lets each
+          #     service restart independently)
+          script: |
+            set -e
+            cd ~/team-notes
+
+            # Get the latest compose files from the repo
+            git pull origin dev
+
+            # Authenticate with GHCR on the server
+            echo "${{ secrets.GHCR_TOKEN }}" | \
+              docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+            # Export the image tag so compose picks it up
+            export IMAGE_TAG=${{ github.sha }}
+            export REGISTRY=ghcr.io/${{ github.repository }}
+
+            # Pull new images (fast — layers are mostly cached)
+            docker compose \
+              -f docker-compose.yml \
+              -f docker-compose.prod.yml \
+              pull api frontend
+
+            # Restart with new images, one service at a time
+            docker compose \
+              -f docker-compose.yml \
+              -f docker-compose.prod.yml \
+              up -d --no-build
+
+            # Clean up old images to save disk space
+            docker image prune -f
