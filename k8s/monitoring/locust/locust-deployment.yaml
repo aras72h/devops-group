@@ -1,10 +1,8 @@
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Locust — Deployment
 #
-# Runs in single-node mode (no master/worker split) which is enough for
-# the course lab. A single Locust pod can comfortably generate 500+ RPS
-# against a local cluster.
+# Runs in single-node mode (no master/worker split). A single Locust pod
+# can comfortably generate 500+ RPS against a local cluster.
 #
 # The locustfile is mounted from the ConfigMap above — no custom image needed.
 # ─────────────────────────────────────────────────────────────────────────────

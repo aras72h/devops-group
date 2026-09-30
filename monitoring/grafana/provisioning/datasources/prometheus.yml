@@ -1,9 +1,8 @@
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Grafana datasource provisioning
 #
 # This file is loaded automatically when Grafana starts.
-# Students do NOT need to manually add the Prometheus datasource in the UI.
+# The Prometheus datasource is available immediately without manual setup.
 # ─────────────────────────────────────────────────────────────────────────────
 
 apiVersion: 1

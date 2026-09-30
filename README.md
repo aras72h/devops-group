@@ -1,44 +1,41 @@
 # Team Notes
 
-A tiny shared notepad application used as the vehicle for an eight-session DevOps workshop.
-
-```
-Browser
-   │
-   ▼
-Frontend (nginx) ──► Node.js API ──► PostgreSQL
-                          │
-                          ▼
-                        Docker
-```
+A collaborative note-taking app with a full DevOps stack — containerised, automatically tested, deployed to production via CI/CD, and observable with Prometheus and Grafana.
 
 ---
 
-## Quick start (local)
+## Stack
+
+| Layer                   | Technology                                      |
+| ----------------------- | ----------------------------------------------- |
+| API                     | Node.js + Express                               |
+| Database                | PostgreSQL 16                                   |
+| Frontend                | Nginx serving static HTML/JS                    |
+| Reverse proxy (prod)    | Caddy (automatic TLS)                           |
+| Monitoring              | Prometheus + Grafana + node-exporter + cAdvisor |
+| Load testing            | Locust                                          |
+| Container orchestration | Docker Compose (dev/prod), k3s (Kubernetes)     |
+| CI/CD                   | GitHub Actions                                  |
+
+---
+
+## Quick start
 
 ```bash
 git clone <repo-url>
 cd devops-group
-cp .env.example .env          # edit passwords before first run
+cp .env.example .env      # set DB_PASSWORD before first run
 docker compose up --build -d
 ```
 
-| URL                   | What                       |
-| --------------------- | -------------------------- |
-| http://localhost:8080 | The app                    |
-| http://localhost:3001 | Grafana (admin / see .env) |
-| http://localhost:8089 | Locust load tester         |
+| URL                   | Service |
+| --------------------- | ------- |
+| http://localhost:8080 | App     |
+| http://localhost:3001 | Grafana |
+| http://localhost:8089 | Locust  |
 
-To wipe the database and start fresh:
-
-```bash
-docker compose down -v
-docker compose up -d
-```
-
-> **Note:** If you change `DB_PASSWORD` in `.env` after the volume already exists,
-> you must run `docker compose down -v` first — otherwise PostgreSQL will reject
-> the new password.
+> If you change `DB_PASSWORD` in `.env` after the volume already exists, run
+> `docker compose down -v` first to wipe the old volume before bringing it back up.
 
 ---
 
@@ -47,33 +44,36 @@ docker compose up -d
 ### Local (Docker Compose)
 
 ```
-docker-compose.yml
-├── db           PostgreSQL 16
-├── api          Node.js + Express (port 3000, internal)
-├── frontend     nginx serving static files (port 8080)
-├── node-exporter  host CPU/memory/disk metrics
-├── cadvisor       per-container metrics
-├── blackbox-exporter  HTTP endpoint probing
-├── prometheus     metrics collection (internal)
-├── grafana        dashboards (port 3001)
-└── locust         load generator web UI (port 8089)
+┌─────────────────────────────────────────────────────┐
+│  docker-compose.yml                                 │
+│                                                     │
+│  frontend (nginx :8080)                             │
+│      └── proxies /api/* and /health → api:3000      │
+│                                                     │
+│  api (Node.js :3000)                                │
+│      └── connects to db:5432                        │
+│                                                     │
+│  db (PostgreSQL :5432)                              │
+│                                                     │
+│  node-exporter  ─┐                                  │
+│  cadvisor        ├─► prometheus → grafana (:3001)   │
+│  blackbox        ┘                                  │
+│                                                     │
+│  locust (:8089) ──► api:3000                        │
+└─────────────────────────────────────────────────────┘
 ```
 
 ### Production (Docker Compose + Caddy)
 
-```
-docker-compose.yml + docker-compose.prod.yml
-├── db, api, frontend   same services, pre-built images from CI
-└── caddy               TLS termination + reverse proxy (ports 80/443)
+Pre-built images from CI are pulled and started with production overrides. Caddy handles TLS termination on ports 80/443 and reverse proxies to the frontend container.
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 ```
 
-### Session 8+ (Kubernetes / k3s)
+### Kubernetes (k3s)
 
-```
-k8s/
-├── app/          db StatefulSet, api Deployment + HPA, frontend Deployment, Ingress
-└── monitoring/   kube-prometheus-stack Helm values, Locust manifests
-```
+Manifests in `k8s/` deploy the full stack to a k3s cluster with a HorizontalPodAutoscaler on the API (scales 1→5 replicas at 50% CPU). The monitoring stack is installed via the `kube-prometheus-stack` Helm chart.
 
 ---
 
@@ -83,45 +83,44 @@ k8s/
 .
 ├── api/
 │   ├── src/
-│   │   ├── index.js          entry point, /health endpoint
-│   │   ├── db.js             PostgreSQL connection pool
-│   │   ├── notes.router.js   CRUD routes for /api/notes
-│   │   └── tests/            unit tests (no DB required)
+│   │   ├── index.js            entry point, /health endpoint
+│   │   ├── db.js               PostgreSQL connection pool
+│   │   ├── notes.router.js     CRUD routes for /api/notes
+│   │   └── tests/              unit tests
 │   ├── Dockerfile
 │   └── package.json
 ├── frontend/
-│   ├── index.html            static UI
-│   ├── index.fa.html         Persian UI
-│   ├── nginx.conf            proxies /api and /health to the API container
+│   ├── index.html              English UI
+│   ├── index.fa.html           Persian (RTL) UI
+│   ├── nginx.conf              proxies /api and /health to the API
 │   └── Dockerfile
 ├── db/
-│   └── init.sql              table creation + seed data
+│   └── init.sql                schema + seed data
 ├── caddy/
-│   └── Caddyfile             production TLS reverse proxy config
+│   └── Caddyfile               TLS reverse proxy config
 ├── monitoring/
 │   ├── prometheus/
-│   │   └── prometheus.yml    scrape config (node-exporter, cAdvisor, blackbox)
+│   │   └── prometheus.yml      scrape config
 │   └── grafana/
-│       ├── provisioning/     auto-provisioned datasource + dashboard loader
-│       └── dashboards/       Team Notes dashboard JSON
+│       ├── provisioning/       auto-provisioned datasource + dashboard
+│       └── dashboards/         Team Notes dashboard JSON
 ├── locust/
-│   └── locustfile.py         mixed realistic traffic (list/read/create/update)
+│   └── locustfile.py           mixed read/write traffic simulation
 ├── k8s/
 │   ├── namespace.yaml
-│   ├── app/                  Kubernetes manifests for the app
-│   └── monitoring/           Helm values + Locust manifests for k8s
+│   ├── app/                    Kubernetes manifests (db, api, frontend, HPA, Ingress)
+│   └── monitoring/             Helm values + Locust manifests
 ├── .github/
 │   └── workflows/
-│       └── ci.yml            test → build → push pipeline
-├── docker-compose.yml        local development (all services)
-├── docker-compose.prod.yml   production overrides (pre-built images, Caddy)
-├── .env.example              required environment variables
-└── docs/sessions/            per-session guides
+│       └── ci.yml              test → build → push → deploy pipeline
+├── docker-compose.yml          local development
+├── docker-compose.prod.yml     production overrides
+└── .env.example                required environment variables
 ```
 
 ---
 
-## API endpoints
+## API
 
 | Method | Path           | Description    |
 | ------ | -------------- | -------------- |
@@ -134,26 +133,68 @@ k8s/
 
 ---
 
-## Sessions
+## CI/CD pipeline
 
-| #   | Topic                     | Guide                                                  |
-| --- | ------------------------- | ------------------------------------------------------ |
-| 1   | Git & Team Collaboration  | [session-01](docs/sessions/session-01-git.md)          |
-| 2   | Docker                    | [session-02](docs/sessions/session-02-docker.md)       |
-| 3   | CI (GitHub Actions)       | [session-03](docs/sessions/session-03-ci.md)           |
-| 4   | Deployment                | [session-04](docs/sessions/session-04-deployment.md)   |
-| 5   | Monitoring & Operations   | [session-05](docs/sessions/session-05-monitoring.md)   |
-| 6   | Break It                  | [session-06](docs/sessions/session-06-break-it.md)     |
-| 7   | Load Testing & Monitoring | [session-07](docs/sessions/session-07-load-scaling.md) |
-| 8   | Kubernetes                | [session-08](docs/sessions/session-08-kubernetes.md)   |
+Every push to `dev` runs three jobs in sequence:
+
+1. **test** — runs unit tests with Node's built-in test runner (no database required)
+2. **build** — builds Docker images and pushes to GHCR tagged with the git SHA
+3. **deploy** — SSHes into the production VPS and restarts the stack with the new images
+
+Pull requests only run the `test` job — no build or deploy.
+
+Required GitHub Secrets: `GHCR_TOKEN`, `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`, `DB_PASSWORD`.
 
 ---
 
-## Roles (rotate each session)
+## Monitoring
 
-| Role       | Focus                                |
-| ---------- | ------------------------------------ |
-| Developer  | Application code                     |
-| DevOps     | Docker, deployment                   |
-| CI/CD      | GitHub Actions pipeline              |
-| Operations | Testing, monitoring, breaking things |
+Prometheus scrapes node-exporter (host metrics), cAdvisor (container metrics), and the blackbox exporter (HTTP probe on `/health` and `/api/notes`). Grafana auto-provisions the datasource and a pre-built dashboard on startup.
+
+To add application-level metrics (request rate, latency histograms), install `prom-client` in the API and expose a `/metrics` endpoint, then add a scrape job pointing to `api:3000`.
+
+---
+
+## Load testing
+
+Open http://localhost:8089, set the number of concurrent users and spawn rate, and start. The locustfile simulates realistic mixed traffic: list notes (×5), read a note (×3), create a note (×2), update a note (×1).
+
+To find the breaking point, ramp users up gradually while watching the Grafana dashboard. The database connection pool typically saturates before the API CPU does.
+
+To scale horizontally:
+
+```bash
+docker compose up -d --scale api=3
+```
+
+---
+
+## Kubernetes
+
+See `k8s/` for manifests. Prerequisites on the target node:
+
+```bash
+# Install k3s
+curl -sfL https://get.k3s.io | sh -
+
+# Install Helm
+curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+# Install metrics-server (required for HPA)
+helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/
+helm install metrics-server metrics-server/metrics-server \
+  --namespace kube-system --set args={--kubelet-insecure-tls}
+
+# Deploy the app
+kubectl apply -f k8s/namespace.yaml
+kubectl apply -f k8s/app/
+
+# Install Prometheus + Grafana
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+  --namespace monitoring --create-namespace \
+  -f k8s/monitoring/kube-prometheus-stack-values.yaml
+
+# Deploy Locust
+kubectl apply -f k8s/monitoring/locust/
+```

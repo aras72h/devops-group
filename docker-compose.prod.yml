@@ -6,7 +6,7 @@
 #
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 #
-# Or create an alias on the server (see docs/sessions/session-04-deployment.md)
+# Or create an alias on the server
 #
 # Key differences from dev:
 #   - Images come from the registry (built by CI), not local builds
@@ -17,7 +17,6 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
-
   db:
     restart: always
     # No port exposed — only reachable inside the Docker network

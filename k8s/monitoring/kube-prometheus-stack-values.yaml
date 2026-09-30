@@ -1,4 +1,3 @@
-
 # ─────────────────────────────────────────────────────────────────────────────
 # kube-prometheus-stack Helm values — tuned for k3s
 #
@@ -35,7 +34,7 @@ prometheus:
     # This allows Prometheus to discover metrics from the notes namespace.
     serviceMonitorSelectorNilUsesHelmValues: false
 
-    # Keep metrics for 15 days — plenty for a course lab
+    # Keep metrics for 15 days
     retention: 15d
 
     # Storage for Prometheus TSDB — k3s will use local-path provisioner
@@ -50,9 +49,9 @@ prometheus:
 # ── Grafana ────────────────────────────────────────────────────────────────────
 grafana:
   adminUser: admin
-  adminPassword: "changeme"    # ← change this
+  adminPassword: "changeme" # ← change this
 
-  # Disable signup — students log in with the admin account
+  # Disable signup
   grafana.ini:
     users:
       allow_sign_up: false
@@ -66,7 +65,7 @@ grafana:
     annotations:
       traefik.ingress.kubernetes.io/router.entrypoints: web
     hosts:
-      - grafana.yourdomain.com    # ← replace with your actual domain
+      - grafana.yourdomain.com # ← replace with your actual domain
     paths:
       - /
 

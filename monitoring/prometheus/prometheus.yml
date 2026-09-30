@@ -1,4 +1,3 @@
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Prometheus configuration
 #
@@ -10,11 +9,10 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 global:
-  scrape_interval:     15s   # pull metrics every 15 seconds
-  evaluation_interval: 15s   # evaluate alert rules every 15 seconds
+  scrape_interval: 15s # pull metrics every 15 seconds
+  evaluation_interval: 15s # evaluate alert rules every 15 seconds
 
 scrape_configs:
-
   # ── Prometheus itself ───────────────────────────────────────────────────────
   - job_name: "prometheus"
     static_configs:
@@ -39,7 +37,8 @@ scrape_configs:
   # or rely on cAdvisor for container-level stats.
   #
   # To add real app-level metrics (request rate, latency, error rate),
-  # see session-07 guide — that's the "add prom-client" stretch goal.
+  # install prom-client in the API and expose a /metrics endpoint,
+  # then add a scrape job pointing to api:3000 with metrics_path: /metrics.
   - job_name: "team-notes-api-health"
     metrics_path: /probe
     params:
