@@ -1,18 +1,20 @@
-# ─────────────────────────────────────────────────────────────────────────────
 # Local development
 #
 # Usage:
 #   docker compose up --build        # first run
 #   docker compose up                # subsequent runs
 #   docker compose down              # stop everything (data is preserved)
-#   docker compose down -v           # stop AND wipe the database volume
+#   docker compose down -v           # stop AND wipe all volumes
 #
-# The app will be available at http://localhost:8080
-# ─────────────────────────────────────────────────────────────────────────────
+# Resource limits are applied to every service via the deploy.resources block.
+# These are soft ceilings — containers can burst below the limit freely,
+# but will be throttled (CPU) or OOM-killed (memory) if they exceed it.
+#
+# The app will be available at http://localhost:4000
 
 services:
 
-  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  # PostgreSQL
   db:
     image: postgres:16-alpine
     restart: unless-stopped
@@ -21,25 +23,30 @@ services:
       POSTGRES_USER:     ${DB_USER:-notes_user}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-notes_pass}
     volumes:
-      # Named volume keeps data between `docker compose down` / `up` cycles
       - db_data:/var/lib/postgresql/data
-      # Seed script runs automatically on first start (when the volume is empty)
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-notes_user} -d ${DB_NAME:-notes}"]
       interval: 5s
       timeout: 5s
       retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 256m
+        reservations:
+          cpus: "0.1"
+          memory: 64m
     networks:
       - notes_net
 
-  # ── Node.js API ─────────────────────────────────────────────────────────────
+  # Node.js API
   api:
     build:
       context: ./api
       dockerfile: Dockerfile
     restart: unless-stopped
-    # --init passes signals properly so the container stops quickly
     init: true
     environment:
       PORT:        3000
@@ -48,6 +55,9 @@ services:
       DB_NAME:     ${DB_NAME:-notes}
       DB_USER:     ${DB_USER:-notes_user}
       DB_PASSWORD: ${DB_PASSWORD:-notes_pass}
+      AGENT_DIR:   /agent-data
+    volumes:
+      - agent_data:/agent-data
     depends_on:
       db:
         condition: service_healthy
@@ -56,28 +66,180 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256m
+        reservations:
+          cpus: "0.05"
+          memory: 64m
     networks:
       - notes_net
 
-  # ── Frontend (nginx + static files) ────────────────────────────────────────
+  # Frontend (nginx + static files)
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
     restart: unless-stopped
     ports:
-      # Only the frontend is exposed to the host.
-      # Everything else talks over the internal Docker network.
-      - "${FRONTEND_PORT:-8080}:80"
+      - "${FRONTEND_PORT:-4000}:80"
     depends_on:
       api:
         condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 64m
+        reservations:
+          cpus: "0.05"
+          memory: 16m
+    networks:
+      - notes_net
+
+  # Node Exporter — host CPU/memory/disk/network metrics
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    restart: unless-stopped
+    pid: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.sysfs=/host/sys"
+      - "--path.rootfs=/rootfs"
+      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 64m
+    networks:
+      - notes_net
+
+  # cAdvisor — per-container metrics
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    restart: unless-stopped
+    privileged: true
+    devices:
+      - /dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      - /dev/disk:/dev/disk:ro
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128m
+    networks:
+      - notes_net
+
+  # Blackbox Exporter — HTTP probe
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.25.0
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: 32m
+    networks:
+      - notes_net
+
+  # Prometheus — metrics collection (15d retention, ~1GB max on disk)
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+      - "--storage.tsdb.retention.size=1GB"
+      - "--web.enable-lifecycle"
+    depends_on:
+      - node-exporter
+      - cadvisor
+      - blackbox-exporter
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512m
+        reservations:
+          cpus: "0.05"
+          memory: 128m
+    networks:
+      - notes_net
+
+  # Grafana — dashboards
+  grafana:
+    image: grafana/grafana:11.1.0
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER:      ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD:  ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP:      "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-4001}:3000"
+    depends_on:
+      - prometheus
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256m
+        reservations:
+          cpus: "0.05"
+          memory: 64m
+    networks:
+      - notes_net
+
+  # Locust — load generator
+  locust:
+    image: locustio/locust:2.32.2
+    restart: unless-stopped
+    volumes:
+      - ./locust:/home/locust
+    command: >
+      -f /home/locust/locustfile.py
+      --host http://api:3000
+      --web-port 4002
+    ports:
+      - "${LOCUST_PORT:-4002}:4002"
+    depends_on:
+      api:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 512m
     networks:
       - notes_net
 
 volumes:
   db_data:
+  prometheus_data:
+  grafana_data:
+  agent_data:
 
 networks:
   notes_net:
     driver: bridge
+

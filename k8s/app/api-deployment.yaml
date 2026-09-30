@@ -1,0 +1,99 @@
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Team Notes API — Deployment
+#
+# Key differences from Docker Compose:
+#  - resources.requests.cpu is REQUIRED for HPA to calculate utilization %
+#  - readinessProbe gates traffic — a Pod won't receive requests until the
+#    probe passes. This prevents the "starting" race condition that Compose
+#    handles with healthcheck + depends_on.
+#  - livenessProbe restarts the container if it becomes unresponsive.
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: notes
+  labels:
+    app: api
+    app.kubernetes.io/part-of: team-notes
+spec:
+  replicas: 1           # HPA will adjust this between 1 and 5
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      # Non-root user — matches the Dockerfile's USER appuser
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+
+      containers:
+        - name: api
+          image: ghcr.io/your-org/team-notes-api:latest   # set via IMAGE_TAG in CI
+          imagePullPolicy: Always
+          env:
+            - name: PORT
+              value: "3000"
+            - name: DB_HOST
+              value: db           # resolves to the db Service via CoreDNS
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: db-secret
+                  key: db-name
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: db-secret
+                  key: db-user
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: db-secret
+                  key: db-password
+          ports:
+            - containerPort: 3000
+
+          # ── Resource limits ────────────────────────────────────────────────
+          # requests.cpu is what HPA uses to calculate utilization:
+          #   utilization % = actual_cpu / requests.cpu * 100
+          # If you set requests.cpu too low, HPA will scale out at very low
+          # absolute CPU. Too high, and it won't scale until CPU is very high.
+          # 100m (100 millicores = 0.1 CPU) is reasonable for a light Node.js API.
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+
+          # ── Readiness probe ────────────────────────────────────────────────
+          # Traffic is only sent to a Pod when readiness passes.
+          # This prevents users hitting a Pod that's still connecting to the DB.
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+
+          # ── Liveness probe ─────────────────────────────────────────────────
+          # If liveness fails, Kubernetes restarts the container.
+          # Use a longer threshold than readiness to avoid restart loops.
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3

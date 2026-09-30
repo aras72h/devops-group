@@ -1,0 +1,50 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Team Notes API — HorizontalPodAutoscaler
+#
+# Prerequisites:
+#   1. metrics-server must be installed (see k8s/README or the main README)
+#   2. api Deployment must have resources.requests.cpu set
+#
+# How it works:
+#   - Every 15 seconds, HPA reads CPU from metrics-server
+#   - Calculates: desiredReplicas = ceil(currentReplicas * (currentCPU / 50%))
+#   - If desiredReplicas ≠ currentReplicas, it patches the Deployment
+#   - Scale-out: immediate (next 15s cycle)
+#   - Scale-in: waits 5 minutes to prevent flapping (default stabilization window)
+#
+# Example:
+#   1 replica at 120% CPU → needs ceil(1 * 120/50) = 3 replicas
+#   3 replicas each at 20% CPU → needs ceil(3 * 20/50) = 2 replicas
+#   After 5 minutes at 2 replicas with low CPU → scales back to 1
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api-hpa
+  namespace: notes
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api
+
+  minReplicas: 1
+  maxReplicas: 5
+
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 50 # scale out when average CPU > 50% of request
+
+  # Scale-in stabilization: don't scale down for 5 minutes after load drops.
+  # This prevents yo-yo scaling where a brief lull triggers a scale-in only
+  # for load to return immediately.
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+    scaleUp:
+      stabilizationWindowSeconds: 0 # scale out immediately

@@ -1,0 +1,54 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Locust — Deployment
+#
+# Runs in single-node mode (no master/worker split). A single Locust pod
+# can comfortably generate 500+ RPS against a local cluster.
+#
+# The locustfile is mounted from the ConfigMap above — no custom image needed.
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: locust
+  namespace: monitoring
+  labels:
+    app: locust
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: locust
+  template:
+    metadata:
+      labels:
+        app: locust
+    spec:
+      containers:
+        - name: locust
+          image: locustio/locust:2.32.2
+          # Point at the api Service in the notes namespace.
+          # Full DNS: api.notes.svc.cluster.local:3000
+          args:
+            - "-f"
+            - "/home/locust/locustfile.py"
+            - "--host"
+            - "http://api.notes.svc.cluster.local:3000"
+            - "--web-port"
+            - "8089"
+          ports:
+            - containerPort: 8089
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          volumeMounts:
+            - name: locustfile
+              mountPath: /home/locust
+      volumes:
+        - name: locustfile
+          configMap:
+            name: locustfile

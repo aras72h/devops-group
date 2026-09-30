@@ -1,91 +1,218 @@
 # Team Notes
 
-A tiny shared notepad application used as the vehicle for a six-session DevOps course.
+A collaborative note-taking app with a full DevOps stack — containerised, automatically tested, deployed to production via CI/CD, and observable with Prometheus and Grafana.
 
-```
-Browser
-   │
-   ▼
-Frontend (nginx) ──► Node.js API ──► PostgreSQL
-                          │
-                          ▼
-                        Docker
-```
+---
 
-## Quick start (local)
+## Stack
+
+| Layer                   | Technology                                      |
+| ----------------------- | ----------------------------------------------- |
+| API                     | Node.js + Express                               |
+| Database                | PostgreSQL 16                                   |
+| Frontend                | Nginx serving static HTML/JS                    |
+| Reverse proxy (prod)    | Caddy (automatic TLS)                           |
+| Monitoring              | Prometheus + Grafana + node-exporter + cAdvisor |
+| Load testing            | Locust                                          |
+| Container orchestration | Docker Compose (dev/prod), k3s (Kubernetes)     |
+| CI/CD                   | GitHub Actions                                  |
+
+---
+
+## Quick start
 
 ```bash
 git clone <repo-url>
-cd team-notes
-cp .env.example .env          # edit DB_PASSWORD if you like
-docker compose up --build
+cd devops-group
+cp .env.example .env      # set DB_PASSWORD before first run
+docker compose up --build -d
 ```
 
-Open **http://localhost:8080**.
+| URL                   | Service |
+| --------------------- | ------- |
+| http://localhost:4000 | App     |
+| http://localhost:4001 | Grafana |
+| http://localhost:4002 | Locust  |
 
-To wipe the database and start fresh:
+> If you change `DB_PASSWORD` in `.env` after the volume already exists, run
+> `docker compose down -v` first to wipe the old volume before bringing it back up.
+
+---
+
+## Architecture
+
+### Local (Docker Compose)
+
+```
+┌─────────────────────────────────────────────────────┐
+│  docker-compose.yml                                 │
+│                                                     │
+│  frontend (nginx :4000)                             │
+│      └── proxies /api/* and /health → api:3000      │
+│                                                     │
+│  api (Node.js :3000)                                │
+│      └── connects to db:5432                        │
+│                                                     │
+│  db (PostgreSQL :5432)                              │
+│                                                     │
+│  node-exporter  ─┐                                  │
+│  cadvisor        ├─► prometheus → grafana (:4001)   │
+│  blackbox        ┘                                  │
+│                                                     │
+│  locust (:4002) ──► api:3000                        │
+└─────────────────────────────────────────────────────┘
+```
+
+### Production (Docker Compose + Caddy)
+
+Pre-built images from CI are pulled and started with production overrides. Caddy handles TLS termination on ports 80/443 and reverse proxies to the frontend container.
 
 ```bash
-docker compose down -v
-docker compose up
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 ```
+
+### Kubernetes (k3s)
+
+Manifests in `k8s/` deploy the full stack to a k3s cluster with a HorizontalPodAutoscaler on the API (scales 1→5 replicas at 50% CPU). The monitoring stack is installed via the `kube-prometheus-stack` Helm chart.
+
+---
 
 ## Project layout
 
 ```
-team-notes/
-├── api/                    Node.js + Express API
+.
+├── api/
 │   ├── src/
-│   │   ├── index.js        entry point, /health endpoint
-│   │   ├── db.js           PostgreSQL connection pool
-│   │   ├── notes.router.js CRUD routes for /api/notes
-│   │   └── tests/          unit tests (no DB required)
+│   │   ├── index.js            entry point, /health endpoint
+│   │   ├── db.js               PostgreSQL connection pool
+│   │   ├── notes.router.js     CRUD routes for /api/notes
+│   │   └── tests/              unit tests
 │   ├── Dockerfile
 │   └── package.json
-├── frontend/               Static HTML + vanilla JS
-│   ├── index.html
-│   ├── nginx.conf          proxies /api and /health to the api container
+├── frontend/
+│   ├── index.html              English UI
+│   ├── index.fa.html           Persian (RTL) UI
+│   ├── nginx.conf              proxies /api and /health to the API
 │   └── Dockerfile
 ├── db/
-│   └── init.sql            table creation + seed data
+│   └── init.sql                schema + seed data
 ├── caddy/
-│   └── Caddyfile           production TLS reverse proxy
+│   └── Caddyfile               TLS reverse proxy config
+├── monitoring/
+│   ├── prometheus/
+│   │   └── prometheus.yml      scrape config
+│   └── grafana/
+│       ├── provisioning/       auto-provisioned datasource + dashboard
+│       └── dashboards/         Team Notes dashboard JSON
+├── locust/
+│   └── locustfile.py           mixed read/write traffic simulation
+├── k8s/
+│   ├── namespace.yaml
+│   ├── app/                    Kubernetes manifests (db, api, frontend, HPA, Ingress)
+│   └── monitoring/             Helm values + Locust manifests
 ├── .github/
 │   └── workflows/
-│       └── ci.yml          test → build → deploy pipeline
-├── docker-compose.yml      local development
-├── docker-compose.prod.yml production overrides
-├── .env.example
-└── docs/sessions/          per-session workshop guides
+│       └── ci.yml              test → build → push → deploy pipeline
+├── docker-compose.yml          local development
+├── docker-compose.prod.yml     production overrides
+└── .env.example                required environment variables
 ```
 
-## API endpoints
+---
 
-| Method | Path              | Description       |
-|--------|-------------------|-------------------|
-| GET    | /health           | Health check      |
-| GET    | /api/notes        | List all notes    |
-| GET    | /api/notes/:id    | Get one note      |
-| POST   | /api/notes        | Create a note     |
-| PUT    | /api/notes/:id    | Update a note     |
-| DELETE | /api/notes/:id    | Delete a note     |
+## API
 
-## Sessions
+| Method | Path           | Description    |
+| ------ | -------------- | -------------- |
+| GET    | /health        | Health check   |
+| GET    | /api/notes     | List all notes |
+| GET    | /api/notes/:id | Get one note   |
+| POST   | /api/notes     | Create a note  |
+| PUT    | /api/notes/:id | Update a note  |
+| DELETE | /api/notes/:id | Delete a note  |
 
-| # | Topic | Guide |
-|---|-------|-------|
-| 1 | Git & Team Collaboration | [session-01](docs/sessions/session-01-git.md) |
-| 2 | Docker | [session-02](docs/sessions/session-02-docker.md) |
-| 3 | CI (GitHub Actions) | [session-03-ci](docs/sessions/session-03-ci.md) |
-| 4 | Deployment | [session-04](docs/sessions/session-04-deployment.md) |
-| 5 | Monitoring & Operations | [session-05](docs/sessions/session-05-monitoring.md) |
-| 6 | Break It | [session-06](docs/sessions/session-06-break-it.md) |
+---
 
-## Roles (rotate each session)
+## Required GitHub Secrets
 
-| Role | Focus |
-|------|-------|
-| Developer | Application code |
-| DevOps | Docker, deployment |
-| CI/CD | GitHub Actions pipeline |
-| Operations | Testing, monitoring, breaking things |
+Go to **Settings → Secrets and variables → Actions** in your repository and add these:
+
+| Secret | Required for | Value |
+|---|---|---|
+| `GHCR_TOKEN` | build + deploy | GitHub PAT with `write:packages` and `repo` scopes. Create at: GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic) |
+| `VPS_HOST` | deploy only | IP or hostname of the production server e.g. `203.0.113.10` |
+| `VPS_USER` | deploy only | SSH username on the server e.g. `deploy` |
+| `VPS_SSH_KEY` | deploy only | Full contents of the private SSH key file including the `-----BEGIN...` and `-----END...` lines |
+
+The deploy job skips automatically if `VPS_HOST` is not set — so you can push freely without a production server configured.
+
+---
+
+## CI/CD pipeline
+
+Every push to `dev` runs three jobs in sequence:
+
+1. **test** — runs unit tests with Node's built-in test runner (no database required)
+2. **build** — builds Docker images and pushes to GHCR tagged with the git SHA
+3. **deploy** — SSHes into the production VPS and restarts the stack with the new images
+
+Pull requests only run the `test` job — no build or deploy.
+
+Required GitHub Secrets: `GHCR_TOKEN`, `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`, `DB_PASSWORD`.
+
+---
+
+## Monitoring
+
+Prometheus scrapes node-exporter (host metrics), cAdvisor (container metrics), and the blackbox exporter (HTTP probe on `/health` and `/api/notes`). Grafana auto-provisions the datasource and a pre-built dashboard on startup.
+
+To add application-level metrics (request rate, latency histograms), install `prom-client` in the API and expose a `/metrics` endpoint, then add a scrape job pointing to `api:3000`.
+
+---
+
+## Load testing
+
+Open http://localhost:4002, set the number of concurrent users and spawn rate, and start. The locustfile simulates realistic mixed traffic: list notes (×5), read a note (×3), create a note (×2), update a note (×1).
+
+To find the breaking point, ramp users up gradually while watching the Grafana dashboard. The database connection pool typically saturates before the API CPU does.
+
+To scale horizontally:
+
+```bash
+docker compose up -d --scale api=3
+```
+
+---
+
+## Kubernetes
+
+See `k8s/` for manifests. Prerequisites on the target node:
+
+```bash
+# Install k3s
+curl -sfL https://get.k3s.io | sh -
+
+# Install Helm
+curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+# Install metrics-server (required for HPA)
+helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/
+helm install metrics-server metrics-server/metrics-server \
+  --namespace kube-system --set args={--kubelet-insecure-tls}
+
+# Deploy the app
+kubectl apply -f k8s/namespace.yaml
+kubectl apply -f k8s/app/
+
+# Install Prometheus + Grafana
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+  --namespace monitoring --create-namespace \
+  -f k8s/monitoring/kube-prometheus-stack-values.yaml
+
+# Deploy Locust
+kubectl apply -f k8s/monitoring/locust/
+```
+
+
+
