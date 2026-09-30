@@ -5,11 +5,15 @@
 #
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 #
-# Required .env vars on the server:
-#   IMAGE_TAG   — git SHA set by CI (or "latest")
-#   GHCR_TOKEN  — for docker login before pulling
+# This file:
+#   - Overrides api and frontend to use pre-built images from GHCR
+#   - Adds Caddy for TLS termination
+#   - Disables all monitoring services (Prometheus, Grafana, Locust,
+#     node-exporter, cAdvisor, blackbox-exporter) — not needed in prod
+#   - Only IMAGE_TAG needs to be set in .env on the server
 
 services:
+
   db:
     restart: always
     deploy:
@@ -54,6 +58,33 @@ services:
       resources:
         limits:
           memory: 64m
+
+  # ── Monitoring disabled in production ────────────────────────────────────────
+  # These services are for local development only. Setting scale: 0 prevents
+  # them from starting when using the prod override.
+  node-exporter:
+    deploy:
+      replicas: 0
+
+  cadvisor:
+    deploy:
+      replicas: 0
+
+  blackbox-exporter:
+    deploy:
+      replicas: 0
+
+  prometheus:
+    deploy:
+      replicas: 0
+
+  grafana:
+    deploy:
+      replicas: 0
+
+  locust:
+    deploy:
+      replicas: 0
 
 volumes:
   caddy_data:
