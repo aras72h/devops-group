@@ -1,118 +1,132 @@
 /**
- * Unit tests for the notes router logic.
+ * Unit tests for the notes router.
  *
- * These tests do NOT need a real database — they mock the pool so the
- * CI pipeline can run them without spinning up PostgreSQL.
+ * No database required. pg is stubbed via Node's require cache before
+ * db.js or notes.router.js load, so no real connection is ever attempted.
  *
- * Run with:  npm test
+ * Works on any Node version, no flags needed.
+ *
+ * Run with: npm test
  */
 
-const { describe, it, mock, beforeEach } = require('node:test');
+'use strict';
+
+const { describe, it, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 
-// ── Minimal mock of pg pool ──────────────────────────────────────────────────
-let mockQueryResult = { rows: [], rowCount: 0 };
+// ── Stub pg before anything imports it ───────────────────────────────────────
+// Node caches modules by resolved path. By inserting a fake entry under the
+// 'pg' key before db.js or notes.router.js are required, those modules get
+// the stub instead of the real pg driver.
 
-mock.module('pg', {
-  namedExports: {
-    Pool: class {
-      query() {
-        return Promise.resolve(mockQueryResult);
-      }
-      connect() {
-        return Promise.resolve({
-          query: () => Promise.resolve(),
-          release: () => {},
-        });
-      }
-    },
-  },
-});
+let _queryFn = async () => ({ rows: [], rowCount: 0 });
 
-// Import after mock is in place
+const fakePool = {
+  query:   (...args) => _queryFn(...args),
+  connect: async () => ({
+    query:   async () => {},
+    release: () => {},
+  }),
+};
+
+// Insert stub into the require cache under the name 'pg'
+require.cache[require.resolve('pg')] = {
+  id:       require.resolve('pg'),
+  filename: require.resolve('pg'),
+  loaded:   true,
+  exports:  { Pool: class FakePool { query(...a) { return fakePool.query(...a); } } },
+};
+
+// Now it's safe to load our modules — they'll pick up the stub
 const { pool } = require('../db');
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// Point pool.query at our controllable _queryFn so tests can override it
+pool.query = (...args) => _queryFn(...args);
+
+const router = require('../notes.router');
+
+// ── Response stub ─────────────────────────────────────────────────────────────
 function makeRes() {
-  const res = {
+  return {
     _status: 200,
-    _body: undefined,
+    _body:   undefined,
     status(code) { this._status = code; return this; },
-    json(body)   { this._body = body; return this; },
+    json(body)   { this._body   = body; return this; },
     end()        { return this; },
   };
-  return res;
 }
 
-// ── Tests ────────────────────────────────────────────────────────────────────
-describe('Notes validation', () => {
-  it('rejects a note with no title (POST)', async () => {
-    // Dynamically import the router to pick up the mocked module
-    const router = require('../notes.router');
+// ── Route lookup ──────────────────────────────────────────────────────────────
+function getHandler(method, routePath) {
+  const layer = router.stack.find(
+    (l) =>
+      l.route &&
+      l.route.methods[method] &&
+      (routePath === undefined || l.route.path === routePath)
+  );
+  assert.ok(layer, `route ${method.toUpperCase()} ${routePath ?? '(any)'} not found`);
+  return layer.route.stack[0].handle;
+}
 
-    // Find the POST handler (stack entry where method === 'post' or layer route POST)
-    const postLayer = router.stack.find(
-      (l) => l.route && l.route.methods.post
-    );
-    assert.ok(postLayer, 'POST route should exist');
+// ── Tests ─────────────────────────────────────────────────────────────────────
+describe('Notes router', () => {
 
-    const handler = postLayer.route.stack[0].handle;
-    const req = { body: { title: '', content: 'hello' }, params: {} };
+  beforeEach(() => {
+    // Safe default — returns nothing, no error
+    _queryFn = async () => ({ rows: [], rowCount: 0 });
+  });
+
+  // ── POST /api/notes ─────────────────────────────────────────────────────────
+  it('POST rejects an empty title', async () => {
     const res = makeRes();
-
-    await handler(req, res, () => {});
+    await getHandler('post')({ body: { title: '', content: 'x' }, params: {} }, res, () => {});
     assert.equal(res._status, 400);
     assert.equal(res._body.error, 'Title is required');
   });
 
-  it('rejects a note update with no title (PUT)', async () => {
-    const router = require('../notes.router');
-
-    const putLayer = router.stack.find(
-      (l) => l.route && l.route.methods.put
-    );
-    assert.ok(putLayer, 'PUT route should exist');
-
-    const handler = putLayer.route.stack[0].handle;
-    const req = { body: { title: '  ' }, params: { id: '1' } };
+  it('POST rejects a whitespace-only title', async () => {
     const res = makeRes();
-
-    await handler(req, res, () => {});
+    await getHandler('post')({ body: { title: '   ' }, params: {} }, res, () => {});
     assert.equal(res._status, 400);
     assert.equal(res._body.error, 'Title is required');
   });
 
-  it('returns 404 when note is not found (GET /:id)', async () => {
-    mockQueryResult = { rows: [], rowCount: 0 };
-    const router = require('../notes.router');
+  it('POST creates a note and returns 201', async () => {
+    const note = { id: 1, title: 'Hello', content: 'World', created_at: new Date() };
+    _queryFn = async () => ({ rows: [note], rowCount: 1 });
 
-    const getOneLayer = router.stack.find(
-      (l) => l.route && l.route.path === '/:id' && l.route.methods.get
-    );
-    assert.ok(getOneLayer, 'GET /:id route should exist');
-
-    const handler = getOneLayer.route.stack[0].handle;
-    const req = { params: { id: '999' } };
     const res = makeRes();
-
-    await handler(req, res, () => {});
-    assert.equal(res._status, 404);
+    await getHandler('post')({ body: { title: 'Hello', content: 'World' }, params: {} }, res, () => {});
+    assert.equal(res._status, 201);
+    assert.equal(res._body.title, 'Hello');
   });
 
-  it('returns 404 when deleting a non-existent note (DELETE /:id)', async () => {
-    mockQueryResult = { rows: [], rowCount: 0 };
-    const router = require('../notes.router');
-
-    const deleteLayer = router.stack.find(
-      (l) => l.route && l.route.methods.delete
-    );
-    assert.ok(deleteLayer, 'DELETE route should exist');
-
-    const handler = deleteLayer.route.stack[0].handle;
-    const req = { params: { id: '999' } };
+  // ── PUT /api/notes/:id ──────────────────────────────────────────────────────
+  it('PUT rejects an empty title', async () => {
     const res = makeRes();
-
-    await handler(req, res, () => {});
-    assert.equal(res._status, 404);
+    await getHandler('put', '/:id')({ body: { title: '  ' }, params: { id: '1' } }, res, () => {});
+    assert.equal(res._status, 400);
+    assert.equal(res._body.error, 'Title is required');
   });
+
+  // ── GET /api/notes/:id ──────────────────────────────────────────────────────
+  it('GET /:id returns 404 for a missing note', async () => {
+    _queryFn = async () => ({ rows: [], rowCount: 0 });
+
+    const res = makeRes();
+    await getHandler('get', '/:id')({ params: { id: '999' } }, res, () => {});
+    assert.equal(res._status, 404);
+    assert.equal(res._body.error, 'Note not found');
+  });
+
+  // ── DELETE /api/notes/:id ───────────────────────────────────────────────────
+  it('DELETE /:id returns 404 for a missing note', async () => {
+    _queryFn = async () => ({ rows: [], rowCount: 0 });
+
+    const res = makeRes();
+    await getHandler('delete', '/:id')({ params: { id: '999' } }, res, () => {});
+    assert.equal(res._status, 404);
+    assert.equal(res._body.error, 'Note not found');
+  });
+
 });
