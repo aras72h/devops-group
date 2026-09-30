@@ -7,12 +7,15 @@ on:
     branches: [dev]
 
 env:
-  REGISTRY: ghcr.io
+  REGISTRY:       ghcr.io
   API_IMAGE:      ghcr.io/${{ github.repository }}/api
   FRONTEND_IMAGE: ghcr.io/${{ github.repository }}/frontend
 
 jobs:
 
+  # ── Test ────────────────────────────────────────────────────────────────────
+  # Runs on every push and PR. No dependencies installed — tests are
+  # self-contained and stub all third-party modules internally.
   test:
     name: Run tests
     runs-on: ubuntu-latest
@@ -29,6 +32,9 @@ jobs:
         working-directory: api
         run: npm test
 
+  # ── Build & push ─────────────────────────────────────────────────────────────
+  # Builds Docker images and pushes to GHCR on every push to dev.
+  # Requires secret: GHCR_TOKEN (GitHub PAT with write:packages + repo scopes)
   build:
     name: Build & push images
     runs-on: ubuntu-latest
@@ -75,6 +81,16 @@ jobs:
           cache-from: type=gha
           cache-to:   type=gha,mode=max
 
+  # ── Deploy ───────────────────────────────────────────────────────────────────
+  # SSHes into the production VPS and restarts the stack with the new images.
+  #
+  # Required secrets (Settings → Secrets and variables → Actions):
+  #   VPS_HOST      IP or hostname of the production server
+  #   VPS_USER      SSH username on the server (e.g. deploy)
+  #   VPS_SSH_KEY   Full contents of the private SSH key (~/.ssh/id_ed25519)
+  #   GHCR_TOKEN    Same token used in the build step above
+  #
+  # This job is skipped automatically if VPS_HOST is not set.
   deploy:
     name: Deploy to VPS
     runs-on: ubuntu-latest

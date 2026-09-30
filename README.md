@@ -133,6 +133,21 @@ Manifests in `k8s/` deploy the full stack to a k3s cluster with a HorizontalPodA
 
 ---
 
+## Required GitHub Secrets
+
+Go to **Settings → Secrets and variables → Actions** in your repository and add these:
+
+| Secret | Required for | Value |
+|---|---|---|
+| `GHCR_TOKEN` | build + deploy | GitHub PAT with `write:packages` and `repo` scopes. Create at: GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic) |
+| `VPS_HOST` | deploy only | IP or hostname of the production server e.g. `203.0.113.10` |
+| `VPS_USER` | deploy only | SSH username on the server e.g. `deploy` |
+| `VPS_SSH_KEY` | deploy only | Full contents of the private SSH key file including the `-----BEGIN...` and `-----END...` lines |
+
+The deploy job skips automatically if `VPS_HOST` is not set — so you can push freely without a production server configured.
+
+---
+
 ## CI/CD pipeline
 
 Every push to `dev` runs three jobs in sequence:
@@ -198,3 +213,5 @@ helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
 # Deploy Locust
 kubectl apply -f k8s/monitoring/locust/
 ```
+
+
