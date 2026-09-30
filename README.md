@@ -30,9 +30,9 @@ docker compose up --build -d
 
 | URL                   | Service |
 | --------------------- | ------- |
-| http://localhost:8080 | App     |
-| http://localhost:3001 | Grafana |
-| http://localhost:8089 | Locust  |
+| http://localhost:4000 | App     |
+| http://localhost:4001 | Grafana |
+| http://localhost:4002 | Locust  |
 
 > If you change `DB_PASSWORD` in `.env` after the volume already exists, run
 > `docker compose down -v` first to wipe the old volume before bringing it back up.
@@ -47,7 +47,7 @@ docker compose up --build -d
 ┌─────────────────────────────────────────────────────┐
 │  docker-compose.yml                                 │
 │                                                     │
-│  frontend (nginx :8080)                             │
+│  frontend (nginx :4000)                             │
 │      └── proxies /api/* and /health → api:3000      │
 │                                                     │
 │  api (Node.js :3000)                                │
@@ -56,10 +56,10 @@ docker compose up --build -d
 │  db (PostgreSQL :5432)                              │
 │                                                     │
 │  node-exporter  ─┐                                  │
-│  cadvisor        ├─► prometheus → grafana (:3001)   │
+│  cadvisor        ├─► prometheus → grafana (:4001)   │
 │  blackbox        ┘                                  │
 │                                                     │
-│  locust (:8089) ──► api:3000                        │
+│  locust (:4002) ──► api:3000                        │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -172,7 +172,7 @@ To add application-level metrics (request rate, latency histograms), install `pr
 
 ## Load testing
 
-Open http://localhost:8089, set the number of concurrent users and spawn rate, and start. The locustfile simulates realistic mixed traffic: list notes (×5), read a note (×3), create a note (×2), update a note (×1).
+Open http://localhost:4002, set the number of concurrent users and spawn rate, and start. The locustfile simulates realistic mixed traffic: list notes (×5), read a note (×3), create a note (×2), update a note (×1).
 
 To find the breaking point, ramp users up gradually while watching the Grafana dashboard. The database connection pool typically saturates before the API CPU does.
 
@@ -213,5 +213,6 @@ helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
 # Deploy Locust
 kubectl apply -f k8s/monitoring/locust/
 ```
+
 
 

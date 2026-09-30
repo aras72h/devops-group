@@ -120,7 +120,7 @@ All four can be adjusted in `agent.js` to change how sensitive the cluster is.
 
 ### Tool links (header)
 
-Links to Grafana (`:3001`) and Locust (`:8089`) open in a new tab.
+Links to Grafana (`:4001`) and Locust (`:4002`) open in a new tab.
 
 ### Load-shed banner
 
@@ -158,10 +158,10 @@ docker compose up --build -d
 
 Start with one replica (default). Open:
 
-- http://localhost:8080 — app + message board
-- http://localhost:8089 — Locust
+- http://localhost:4000 — app + message board
+- http://localhost:4002 — Locust
 - http://localhost:9001 — MinIO console (watch files appear under the `agents` bucket)
-- http://localhost:3001 — Grafana
+- http://localhost:4001 — Grafana
 
 In Locust, ramp to 200 users / 20 spawn rate. Watch:
 
@@ -177,3 +177,4 @@ docker compose up -d --scale api=3
 ```
 
 Now three replica dots appear. Watch them react to load independently, then coordinate to shed writes once the quorum is reached.
+

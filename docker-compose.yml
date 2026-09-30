@@ -10,7 +10,7 @@
 # These are soft ceilings — containers can burst below the limit freely,
 # but will be throttled (CPU) or OOM-killed (memory) if they exceed it.
 #
-# The app will be available at http://localhost:8080
+# The app will be available at http://localhost:4000
 
 services:
 
@@ -84,7 +84,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     ports:
-      - "${FRONTEND_PORT:-8080}:80"
+      - "${FRONTEND_PORT:-4000}:80"
     depends_on:
       api:
         condition: service_healthy
@@ -196,7 +196,7 @@ services:
       - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana_data:/var/lib/grafana
     ports:
-      - "${GRAFANA_PORT:-3001}:3000"
+      - "${GRAFANA_PORT:-4001}:3000"
     depends_on:
       - prometheus
     deploy:
@@ -219,9 +219,9 @@ services:
     command: >
       -f /home/locust/locustfile.py
       --host http://api:3000
-      --web-port 8089
+      --web-port 4002
     ports:
-      - "${LOCUST_PORT:-8089}:8089"
+      - "${LOCUST_PORT:-4002}:4002"
     depends_on:
       api:
         condition: service_healthy
@@ -242,3 +242,4 @@ volumes:
 networks:
   notes_net:
     driver: bridge
+

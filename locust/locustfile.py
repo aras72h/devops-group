@@ -13,7 +13,7 @@ The wait_time of 1–3 seconds between tasks simulates a real user
 thinking before their next action, not a machine hammering the API.
 
 Usage (via the web UI):
-  1. Open http://localhost:8089
+  1. Open http://localhost:4002
   2. Set "Number of users" (e.g. 50, 100, 200)
   3. Set "Spawn rate" — how many users to add per second (e.g. 10)
   4. Set "Host" to http://frontend:80  (already pre-set via --host flag)
@@ -74,7 +74,7 @@ class NoteUser(HttpUser):
 
     # The host is set via --host flag in docker-compose (http://api:3000).
     # Override here only for local testing outside of Docker.
-    # host = "http://localhost:8080"
+    # host = "http://localhost:4000"
 
     def on_start(self):
         """
@@ -188,3 +188,4 @@ class NoteUser(HttpUser):
                     resp.success()
             else:
                 resp.failure(f"health returned {resp.status_code}")
+
