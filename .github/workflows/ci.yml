@@ -49,7 +49,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: api
-        run: npm install
+        run: npm ci
 
       - name: Run tests
         working-directory: api
@@ -154,3 +154,4 @@ jobs:
 
             # Clean up old images to save disk space
             docker image prune -f
+
