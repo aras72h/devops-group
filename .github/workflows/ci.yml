@@ -111,7 +111,6 @@ jobs:
             echo "${{ secrets.GHCR_TOKEN }}" | \
               docker login ghcr.io -u ${{ github.actor }} --password-stdin
             export IMAGE_TAG=${{ github.sha }}
-            export REGISTRY=ghcr.io/${{ github.repository }}
             docker compose \
               -f docker-compose.yml \
               -f docker-compose.prod.yml \
@@ -121,4 +120,5 @@ jobs:
               -f docker-compose.prod.yml \
               up -d --no-build
             docker image prune -f
+
 
