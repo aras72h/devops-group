@@ -25,19 +25,6 @@ jobs:
         with:
           node-version: 22
 
-      - name: Cache node_modules
-        id: cache-node
-        uses: actions/cache@v4
-        with:
-          path: api/node_modules
-          key: node-modules-${{ hashFiles('api/package-lock.json') }}
-
-      - name: Install dependencies
-        if: steps.cache-node.outputs.cache-hit != 'true'
-        working-directory: api
-        run: npm ci
-        timeout-minutes: 3
-
       - name: Run tests
         working-directory: api
         run: npm test
@@ -118,3 +105,4 @@ jobs:
               -f docker-compose.prod.yml \
               up -d --no-build
             docker image prune -f
+
