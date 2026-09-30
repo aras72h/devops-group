@@ -3,10 +3,10 @@
 # Extends docker-compose.yml with production overrides.
 # Never run standalone — always use both files:
 #
-#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d db api frontend caddy
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d db api frontend
 #
-# Only db, api, frontend, and caddy run in production.
-# Monitoring services (Prometheus, Grafana, Locust etc.) are local-dev only.
+# No Caddy — the frontend is exposed directly on port 4000.
+# TLS is handled by the existing web server on the host if needed.
 
 services:
 
@@ -30,31 +30,11 @@ services:
     image: ghcr.io/aras72h/devops-group/frontend:${IMAGE_TAG:-latest}
     build: !reset null
     restart: always
-    ports: !reset []
-    deploy:
-      resources:
-        limits:
-          memory: 64m
-
-  caddy:
-    image: caddy:2-alpine
-    restart: always
     ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - frontend
-    networks:
-      - notes_net
+      - "4000:80"
     deploy:
       resources:
         limits:
           memory: 64m
 
-volumes:
-  caddy_data:
-  caddy_config:
+volumes: {}
