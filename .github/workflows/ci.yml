@@ -118,7 +118,8 @@ jobs:
             docker compose \
               -f docker-compose.yml \
               -f docker-compose.prod.yml \
-              up -d --no-build
+              up -d --no-build db api frontend caddy
             docker image prune -f
+
 
 
