@@ -1,0 +1,30 @@
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Database init SQL — ConfigMap
+#
+# Mounts the same db/init.sql file into the PostgreSQL container.
+# The file content is embedded inline here so the manifest is self-contained.
+#
+# If you update db/init.sql, update this ConfigMap too.
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: db-init-sql
+  namespace: notes
+data:
+  init.sql: |
+    CREATE TABLE IF NOT EXISTS notes (
+      id         SERIAL PRIMARY KEY,
+      title      TEXT        NOT NULL,
+      content    TEXT        NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    INSERT INTO notes (title, content) VALUES
+      ('Welcome', 'This is the Team Notes app. Edit or delete this note.'),
+      ('DevOps tip', 'Always check the logs first: docker compose logs -f api'),
+      ('Session 7', 'Load testing with Locust. Monitoring with Prometheus + Grafana.')
+    ON CONFLICT DO NOTHING;

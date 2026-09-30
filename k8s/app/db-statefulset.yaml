@@ -1,0 +1,90 @@
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PostgreSQL — StatefulSet
+#
+# Why StatefulSet instead of Deployment?
+# A Deployment treats all its Pods as interchangeable — any Pod can replace
+# any other. A StatefulSet gives each Pod a stable identity (db-0, db-1) and
+# a stable PersistentVolumeClaim. For a database this matters: we need the
+# same storage to follow the same pod across restarts.
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: db
+  namespace: notes
+  labels:
+    app: db
+    app.kubernetes.io/part-of: team-notes
+spec:
+  serviceName: db           # must match the Headless Service name
+  replicas: 1
+  selector:
+    matchLabels:
+      app: db
+  template:
+    metadata:
+      labels:
+        app: db
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          env:
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: db-secret
+                  key: db-name
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: db-secret
+                  key: db-user
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: db-secret
+                  key: db-password
+          ports:
+            - containerPort: 5432
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - $(POSTGRES_USER)
+                - -d
+                - $(POSTGRES_DB)
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 10
+          volumeMounts:
+            - name: db-data
+              mountPath: /var/lib/postgresql/data
+            - name: init-sql
+              mountPath: /docker-entrypoint-initdb.d/init.sql
+              subPath: init.sql
+      volumes:
+        - name: init-sql
+          configMap:
+            name: db-init-sql
+
+  # volumeClaimTemplates creates a PVC per replica automatically.
+  # k3s provisions it using the local-path storage class (built-in).
+  volumeClaimTemplates:
+    - metadata:
+        name: db-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 2Gi

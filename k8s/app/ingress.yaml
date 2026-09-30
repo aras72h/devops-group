@@ -1,0 +1,37 @@
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Ingress — routes external HTTP traffic into the cluster
+#
+# k3s includes Traefik as the default Ingress controller.
+# Traefik listens on port 80 (and 443) on the node's IP and forwards
+# requests to Services based on the hostname rules below.
+#
+# To use locally, add these entries to /etc/hosts (or Windows hosts file):
+#   <server-ip>  notes.yourdomain.com
+#   <server-ip>  grafana.yourdomain.com
+#   <server-ip>  locust.yourdomain.com
+#
+# For a real domain, set DNS A records pointing to <server-ip>.
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: notes-ingress
+  namespace: notes
+  annotations:
+    # Tell Traefik to use the web (HTTP) entrypoint
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: notes.yourdomain.com    # ← replace with your actual domain
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80

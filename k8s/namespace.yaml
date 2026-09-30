@@ -1,0 +1,26 @@
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Namespaces
+#
+# Namespaces are like folders — they group related resources and let you
+# apply permissions, resource quotas, and network policies per group.
+#
+# notes      — the application (db, api, frontend)
+# monitoring — observability tools (prometheus, grafana, locust)
+#
+# kube-system is created by k3s and holds Traefik, CoreDNS, metrics-server.
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: notes
+  labels:
+    app.kubernetes.io/part-of: team-notes
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    app.kubernetes.io/part-of: team-notes

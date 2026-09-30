@@ -11,14 +11,13 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
-
   # ── PostgreSQL ──────────────────────────────────────────────────────────────
   db:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_DB:       ${DB_NAME:-notes}
-      POSTGRES_USER:     ${DB_USER:-notes_user}
+      POSTGRES_DB: ${DB_NAME:-notes}
+      POSTGRES_USER: ${DB_USER:-notes_user}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-notes_pass}
     volumes:
       # Named volume keeps data between `docker compose down` / `up` cycles
@@ -26,7 +25,11 @@ services:
       # Seed script runs automatically on first start (when the volume is empty)
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-notes_user} -d ${DB_NAME:-notes}"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${DB_USER:-notes_user} -d ${DB_NAME:-notes}",
+        ]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -42,11 +45,11 @@ services:
     # --init passes signals properly so the container stops quickly
     init: true
     environment:
-      PORT:        3000
-      DB_HOST:     db
-      DB_PORT:     5432
-      DB_NAME:     ${DB_NAME:-notes}
-      DB_USER:     ${DB_USER:-notes_user}
+      PORT: 3000
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-notes}
+      DB_USER: ${DB_USER:-notes_user}
       DB_PASSWORD: ${DB_PASSWORD:-notes_pass}
     depends_on:
       db:
@@ -75,8 +78,119 @@ services:
     networks:
       - notes_net
 
+  # ── Node Exporter — host-level metrics ─────────────────────────────────────
+  # Exposes CPU, memory, disk, network metrics of the Docker host.
+  # Prometheus scrapes this at node-exporter:9100.
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    restart: unless-stopped
+    pid: host # needed to see host-level process stats
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.sysfs=/host/sys"
+      - "--path.rootfs=/rootfs"
+      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
+    networks:
+      - notes_net
+
+  # ── cAdvisor — per-container metrics ────────────────────────────────────────
+  # Exposes CPU %, memory, network I/O for every running container.
+  # This is what makes the "Container CPU" panels in Grafana work.
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    restart: unless-stopped
+    privileged: true
+    devices:
+      - /dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      - /dev/disk:/dev/disk:ro
+    networks:
+      - notes_net
+
+  # ── Blackbox Exporter — HTTP endpoint probing ────────────────────────────────
+  # Prometheus uses this to probe the API's /health and /api/notes endpoints.
+  # Gives us response time and up/down status as Prometheus metrics.
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.25.0
+    restart: unless-stopped
+    networks:
+      - notes_net
+
+  # ── Prometheus — metrics collection ─────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.enable-lifecycle" # allows hot-reload via POST /-/reload
+    depends_on:
+      - node-exporter
+      - cadvisor
+      - blackbox-exporter
+    networks:
+      - notes_net
+
+  # ── Grafana — dashboards & visualisation ─────────────────────────────────────
+  grafana:
+    image: grafana/grafana:11.1.0
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      # Disable telemetry — keeps the container logs clean
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - notes_net
+
+  # ── Locust — load generator with web UI ──────────────────────────────────────
+  # Open http://localhost:8089 to control the load test.
+  # Set users, spawn rate, and watch the Grafana dashboard react in real time.
+  #
+  # The --host flag points Locust at the API directly (bypasses nginx frontend)
+  # so load goes straight to the service under test.
+  locust:
+    image: locustio/locust:2.32.2
+    restart: unless-stopped
+    volumes:
+      - ./locust:/home/locust
+    command: >
+      -f /home/locust/locustfile.py
+      --host http://api:3000
+      --web-port 8089
+    ports:
+      - "${LOCUST_PORT:-8089}:8089"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - notes_net
+
 volumes:
   db_data:
+  prometheus_data:
+  grafana_data:
 
 networks:
   notes_net:

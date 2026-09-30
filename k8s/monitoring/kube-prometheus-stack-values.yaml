@@ -1,0 +1,95 @@
+
+# ─────────────────────────────────────────────────────────────────────────────
+# kube-prometheus-stack Helm values — tuned for k3s
+#
+# Install command:
+#   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+#   helm repo update
+#   helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+#     --namespace monitoring --create-namespace \
+#     -f k8s/monitoring/kube-prometheus-stack-values.yaml
+#
+# Upgrade after changing this file:
+#   helm upgrade kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+#     --namespace monitoring \
+#     -f k8s/monitoring/kube-prometheus-stack-values.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── k3s compatibility ──────────────────────────────────────────────────────────
+# k3s does not run etcd, kubeScheduler, or kubeControllerManager as separate
+# processes with accessible metrics endpoints. Disabling these prevents
+# "connection refused" errors in Prometheus and keeps the dashboard clean.
+kubeEtcd:
+  enabled: false
+
+kubeScheduler:
+  enabled: false
+
+kubeControllerManager:
+  enabled: false
+
+# ── Prometheus ─────────────────────────────────────────────────────────────────
+prometheus:
+  prometheusSpec:
+    # Scrape ServiceMonitors from all namespaces, not just the monitoring namespace.
+    # This allows Prometheus to discover metrics from the notes namespace.
+    serviceMonitorSelectorNilUsesHelmValues: false
+
+    # Keep metrics for 15 days — plenty for a course lab
+    retention: 15d
+
+    # Storage for Prometheus TSDB — k3s will use local-path provisioner
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 5Gi
+
+# ── Grafana ────────────────────────────────────────────────────────────────────
+grafana:
+  adminUser: admin
+  adminPassword: "changeme"    # ← change this
+
+  # Disable signup — students log in with the admin account
+  grafana.ini:
+    users:
+      allow_sign_up: false
+    analytics:
+      reporting_enabled: false
+
+  # Expose Grafana via Traefik Ingress
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+    annotations:
+      traefik.ingress.kubernetes.io/router.entrypoints: web
+    hosts:
+      - grafana.yourdomain.com    # ← replace with your actual domain
+    paths:
+      - /
+
+  # Persistent storage for dashboards and user data
+  persistence:
+    enabled: true
+    size: 2Gi
+
+# ── AlertManager ──────────────────────────────────────────────────────────────
+alertmanager:
+  alertmanagerSpec:
+    storage:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 1Gi
+
+# ── Node Exporter ─────────────────────────────────────────────────────────────
+# Runs as a DaemonSet — one pod per node — to collect host metrics
+prometheus-node-exporter:
+  tolerations:
+    - key: node-role.kubernetes.io/control-plane
+      operator: Exists
+      effect: NoSchedule

@@ -1,0 +1,17 @@
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Grafana datasource provisioning
+#
+# This file is loaded automatically when Grafana starts.
+# Students do NOT need to manually add the Prometheus datasource in the UI.
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false

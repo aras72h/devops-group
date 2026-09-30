@@ -1,0 +1,21 @@
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Grafana dashboard provisioning
+#
+# Tells Grafana to load all .json files from /var/lib/grafana/dashboards.
+# The actual dashboard JSON files are bind-mounted into that directory.
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: 1
+
+providers:
+  - name: "team-notes"
+    orgId: 1
+    folder: "Team Notes"
+    folderUid: "team-notes"
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
